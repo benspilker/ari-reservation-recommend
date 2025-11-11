@@ -230,7 +230,7 @@ def generate_vm_recommendations():
     total_savings = sum(rec["Recommendations"][0]["Annual Savings"] for rec in impact_recs)
     impact_summary = {
         "Total VMs": len(impact_recs),
-        "Total Annual Savings (USD) According to ARI": round(total_savings, 2),
+        "Savings (USD) According to ARI": round(total_savings, 2),
         "Average Savings per VM (USD)": round(total_savings / len(impact_recs), 2)
         if impact_recs
         else 0,

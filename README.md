@@ -88,7 +88,7 @@ python azure-reservation-analysis.py
 === Impact Summary ===
 {
     "Total VMs": 847,
-    "Total Annual Savings (USD) According to ARI": 2859253.26,
+    "Savings (USD) According to ARI": 2859253.26,
     "Average Savings per VM (USD)": 3376.27
 }
 ```
