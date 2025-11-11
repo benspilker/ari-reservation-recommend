@@ -9,7 +9,7 @@ This tool analyzes Azure Virtual Machines and generates recommendations for cost
 - ✅ **Parallel processing** - Runs Azure API and web scraping simultaneously for faster execution
 - ✅ **Multiple output formats** - JSON and Excel spreadsheets with detailed pricing
 - ✅ **Savings calculations** - Compares Pay-as-you-go vs 1-year and 3-year reservations
-- ✅ **Interactive workflow** - Review recommendations before running pricing analysis
+- ✅ **Interactive workflow** - Review VM output before running pricing analysis
 
 ## Requirements
 
