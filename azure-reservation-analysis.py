@@ -84,7 +84,7 @@ def generate_vm_recommendations():
     print("="*80 + "\n")
     
     # Define a variable for the savings threshold
-    savings_threshold = 10
+    savings_threshold = 100
 
     # === Auto-detect Azure Resource Inventory file ===
     matching_files = glob.glob("AzureResourceInventory_Report_*.xlsx")

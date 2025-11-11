@@ -96,15 +96,15 @@ python azure-reservation-analysis.py
 ## Configuration
 
 ### Savings Threshold
-By default, the script filters VMs with annual savings >= $10. To change this, edit line 76:
+By default, the script filters VMs with annual savings >= $100. To change this, edit line 87:
 ```python
-savings_threshold = 10  # Change this value
+savings_threshold = 100  # Change this value (if desired)
 ```
 
 ### Minimum Recommendations
-The script ensures at least 20 VMs are included in the analysis. To change this, edit line 220:
+The script ensures at least 20 VMs are included in the analysis. To change this, edit lines 207 and 211:
 ```python
-if len(impact_recs) < 20:  # Change this value
+if len(impact_recs) < 20:  # Change this value (if desired)
 ```
 
 ## Troubleshooting
