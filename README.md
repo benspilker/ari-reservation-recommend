@@ -67,13 +67,13 @@ python azure-reservation-analysis.py
 - **skus-regions-windows.json** - List of SKU-region pairs processed
 
 ### Excel Spreadsheets
-- **azure_estimate.xlsx** - Detailed pricing with Azure API data
+- **azure_estimate.xlsx** - Detailed pricing with Azure API data (COMPUTE ONLY, NO SOFTWARE OS LICENSING)
   - Pay-as-you-go pricing
   - 1-year and 3-year reservation pricing
   - Monthly cost breakdowns
   - Totals section
 
-- **azure_savings_estimate.xlsx** - Enhanced pricing with vantage.sh data
+- **azure_savings_estimate.xlsx** - Enhanced pricing with vantage.sh data to include estimated compute and software OS costs
   - Sheet1: Formatted with blank rows (3 lines + blank pattern)
   - FilterMe: Flattened data (no blank rows for easy filtering)
   - Annual savings calculations
