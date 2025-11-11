@@ -770,7 +770,7 @@ def main():
     print("\n" + "="*80)
     print("AZURE RESERVATION ANALYSIS TOOL")
     print("="*80)
-    print("\n⚠️ NOTE: This script requires Chrome and ChromeDriver to be installed")
+    print("\nNOTE: This script requires Chrome and ChromeDriver to be installed")
     print("   for web scraping. If you encounter errors in Section 2, please install:")
     print("   - Google Chrome browser")
     print("   - ChromeDriver (matching your Chrome version)")
