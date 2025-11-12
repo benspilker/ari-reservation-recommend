@@ -98,7 +98,77 @@ def generate_vm_recommendations():
 
     # === Load Workbook ===
     advisor_df = pd.read_excel(file_path, sheet_name="Advisor")
-    vm_df = pd.read_excel(file_path, sheet_name="Virtual Machines")
+    
+    # Try to load VM sheet with both possible names
+    vm_sheet_loaded = None
+    try:
+        vm_df = pd.read_excel(file_path, sheet_name="Virtual Machines")
+        vm_sheet_loaded = "Virtual Machines"
+        print(f"Loaded 'Virtual Machines' sheet")
+    except ValueError:
+        try:
+            vm_df = pd.read_excel(file_path, sheet_name="Virtual Machine Scale Sets")
+            vm_sheet_loaded = "Virtual Machine Scale Sets"
+            print(f"Loaded 'Virtual Machine Scale Sets' sheet")
+        except ValueError:
+            raise ValueError(
+                "Could not find sheet 'Virtual Machines' or 'Virtual Machine Scale Sets' in the Excel file. "
+                "Please ensure the Azure Resource Inventory file contains one of these sheets."
+            )
+    
+    # Normalize column names for Virtual Machine Scale Sets
+    if vm_sheet_loaded == "Virtual Machine Scale Sets":
+        print(f"\nAvailable columns in VMSS sheet: {list(vm_df.columns)}")
+        
+        # Column name mappings
+        column_mappings = {
+            "Name": "VM Name",
+            "VM OS": "OS Type",  # VMSS uses "VM OS" instead of "OS Type"
+            "OS": "OS Type",  # If VMSS uses "OS" instead of "OS Type"
+            "Platform": "OS Type",  # Alternative name for OS Type
+            "Operating System": "OS Type",  # Another alternative
+            "OS Image": "OS Name",  # VMSS uses "OS Image" instead of "OS Name"
+            "Image": "OS Name",  # If VMSS uses "Image" instead of "OS Name"
+            "OS Offer": "OS Name",  # Another alternative for OS Name
+        }
+        
+        # Apply mappings that exist in the dataframe
+        renames = {}
+        for old_col, new_col in column_mappings.items():
+            if old_col in vm_df.columns and new_col not in vm_df.columns:
+                renames[old_col] = new_col
+        
+        if renames:
+            vm_df.rename(columns=renames, inplace=True)
+            for old, new in renames.items():
+                print(f"Normalized column '{old}' to '{new}'")
+        
+        print(f"Columns after normalization: {list(vm_df.columns)}")
+
+    # === Filter out separately-licensed OS images ===
+    separately_licensed_os = ["rhel", "red hat", "sles", "suse"]
+    excluded_vms_count = 0  # Track excluded VMs for the summary
+    
+    if "OS Name" in vm_df.columns:
+        initial_count = len(vm_df)
+        initial_unique_vms = vm_df["VM Name"].nunique()
+        
+        # Filter out VMs with separately-licensed OS
+        mask = vm_df["OS Name"].astype(str).str.lower().apply(
+            lambda x: not any(os_type in x for os_type in separately_licensed_os)
+        )
+        vm_df = vm_df[mask]
+        
+        filtered_count = len(vm_df)
+        filtered_unique_vms = vm_df["VM Name"].nunique()
+        excluded_vms_count = initial_unique_vms - filtered_unique_vms
+        
+        if excluded_vms_count > 0:
+            print(f"\n⚠️ Excluded {excluded_vms_count} VM(s) with separately-licensed OS images (RHEL, SLES, etc.)")
+            print(f"   These require separate licensing quotes and cannot use standard Azure reservations.")
+            print(f"   Remaining VMs: {filtered_unique_vms} of {initial_unique_vms}")
+        else:
+            print(f"\n✅ No separately-licensed OS images found - all {filtered_unique_vms} VMs included")
 
     # === Filter only running VMs ===
     if "Power State" in vm_df.columns:
@@ -118,6 +188,15 @@ def generate_vm_recommendations():
     ]
 
     print(f"Filtered Advisor: {len(advisor_filtered)} high-impact reservation recommendations found")
+
+    # === Check for OS information ===
+    has_os_type = "OS Type" in vm_df.columns
+    has_os_name = "OS Name" in vm_df.columns
+    if not has_os_type or not has_os_name:
+        print(f"\n⚠️ WARNING: OS information columns are missing from the spreadsheet.")
+        print(f"   - 'OS Type' column present: {has_os_type}")
+        print(f"   - 'OS Name' column present: {has_os_name}")
+        print(f"   Pricing will use compute-only (Linux base) costs as a conservative estimate.")
 
     # === Build VM Pool with Tag Awareness (ApplicationName + CostCenter fallback) ===
     vm_pool = {}
@@ -228,6 +307,7 @@ def generate_vm_recommendations():
     total_savings = sum(rec["Recommendations"][0]["Annual Savings"] for rec in impact_recs)
     impact_summary = {
         "Total VMs": len(impact_recs),
+        "Excluded VMs (Separate Licensing Required)": excluded_vms_count,
         "Savings (USD) According to ARI": round(total_savings, 2),
         "Average Savings per VM (USD)": round(total_savings / len(impact_recs), 2)
         if impact_recs
@@ -235,6 +315,9 @@ def generate_vm_recommendations():
     }
     print("\n=== Impact Summary ===")
     print(json.dumps(impact_summary, indent=4))
+    
+    if excluded_vms_count > 0:
+        print(f"\n💡 Note: {excluded_vms_count} VM(s) with RHEL/SLES excluded - require separate licensing quotes")
 
     # === Show omitted VMs due to savings threshold ===
     omitted_count = len(recommendations) - len(impact_recs)
@@ -292,7 +375,7 @@ def matches_os(item, os_filter):
     if "spot" in meter or "low priority" in meter:
         return False
 
-    if not os_filter:
+    if not os_filter or os_filter.lower() == "unknown":
         return True
 
     os_filter = os_filter.lower()
@@ -411,6 +494,8 @@ def build_azure_pricing(inputs):
             sanitized_sku_region = f"{sanitized_sku}_{region.lower()}"
 
         print(f"\n🔍 Fetching {sku} in {region} ({os_type})")
+        if os_type.lower() == "unknown":
+            print(f"   ⚠️ OS Type is Unknown - will fetch compute-only pricing (Linux base pricing)")
 
         cache_key = (sku, region)
         if cache_key in price_cache:
@@ -451,7 +536,8 @@ def build_azure_pricing(inputs):
 
         # === PAYG ===
         payg = [p for p in prices if p.get("type") == "Consumption" and matches_os(p, os_type)]
-        if os_type.lower() == "linux":
+        # For Linux or Unknown OS, get the cheapest compute-only option
+        if os_type.lower() in ["linux", "unknown"]:
             payg = sorted(payg, key=lambda x: x.get("unitPrice", 0))[:1]
 
         for p in payg:
@@ -685,8 +771,28 @@ def scrape_single_vm_pricing_compute_only(sku, region, os_type, driver):
 
 def build_final_dataframes(estimate_rows, windows_pricing_data):
     """Build final sorted and formatted DataFrames"""
+    # Validate input data
+    if not estimate_rows:
+        raise ValueError(
+            "No pricing data was retrieved. This could happen if:\n"
+            "  1. No VMs matched the Advisor recommendations\n"
+            "  2. All pricing API calls failed\n"
+            "  3. The inputs.json file is empty or malformed\n"
+            "Please check the output from the pricing collection phase above."
+        )
+    
     # Create initial DataFrame
     df = pd.DataFrame(estimate_rows)
+    
+    # Validate DataFrame has required columns
+    required_columns = ['VM Name', 'Description', 'Estimated monthly cost']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(
+            f"Pricing data is missing required columns: {missing_columns}\n"
+            f"Available columns: {list(df.columns)}\n"
+            "This indicates a problem with the pricing data structure."
+        )
     
     # Extract pricing for sorting
     vm_pricing = {}
