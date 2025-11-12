@@ -102,11 +102,13 @@ def generate_vm_recommendations():
 
     # === Filter only running VMs ===
     if "Power State" in vm_df.columns:
-        initial_vm_count = len(vm_df)
+        initial_unique_vms = vm_df["VM Name"].nunique()
         vm_df = vm_df[vm_df["Power State"].astype(str).str.strip().eq("VM running")]
-        print(f"Filtered Virtual Machines: {len(vm_df)} of {initial_vm_count} are running (Power State = 'VM running')")
+        running_unique_vms = vm_df["VM Name"].nunique()
+        print(f"Filtered Virtual Machines: {running_unique_vms} of {initial_unique_vms} unique VMs are running (Power State = 'VM running')")
     else:
-        print("Warning: 'Power State' column not found — including all VMs.")
+        running_unique_vms = vm_df["VM Name"].nunique()
+        print(f"Warning: 'Power State' column not found — including all {running_unique_vms} unique VMs.")
 
     # === Filter Advisor ===
     advisor_filtered = advisor_df[
@@ -115,11 +117,7 @@ def generate_vm_recommendations():
         & (advisor_df["Description"].str.contains("reserved instance", case=False, na=False))
     ]
 
-    print(f"Filtered Advisor rows: {len(advisor_filtered)}")
-
-    # === Total Quantity in Advisor ===
-    total_quantity = advisor_filtered["Quantity"].sum()
-    print(f"Total quantity of VMs in Advisor sheet: {int(total_quantity)}")
+    print(f"Filtered Advisor: {len(advisor_filtered)} high-impact reservation recommendations found")
 
     # === Build VM Pool with Tag Awareness (ApplicationName + CostCenter fallback) ===
     vm_pool = {}
@@ -221,7 +219,7 @@ def generate_vm_recommendations():
         os_type = rec["Recommendations"][0]["OS"]
         os_counts[os_type] = os_counts.get(os_type, 0) + 1
 
-    print("\n=== Summary Report ===")
+    print("\n=== Summary Report (VMs matched with Advisor recommendations) ===")
     print(f"Unique SKUs: {len(unique_skus)}")
     print(f"Total VMs: {len(recommendations)}")
     print(f"OS Distribution: {os_counts}")
@@ -237,6 +235,11 @@ def generate_vm_recommendations():
     }
     print("\n=== Impact Summary ===")
     print(json.dumps(impact_summary, indent=4))
+
+    # === Show omitted VMs due to savings threshold ===
+    omitted_count = len(recommendations) - len(impact_recs)
+    if omitted_count > 0:
+        print(f"\n⚠️ Savings threshold is set to ${savings_threshold}. Omitted {omitted_count} VM{'s' if omitted_count != 1 else ''} with savings below threshold. Processing {len(impact_recs)} out of {len(recommendations)} VMs.")
 
     # === Create inputs.json for automation ===
     input_json = [
@@ -300,11 +303,95 @@ def matches_os(item, os_filter):
     return False
 
 
+# Azure region to Vantage.sh region mapping
+AZURE_TO_VANTAGE_REGION_MAP = {
+    # US Regions
+    "eastus": "us-east",
+    "eastus2": "us-east-2",
+    "westus": "us-west",
+    "westus2": "us-west-2",
+    "westus3": "us-west-3",
+    "centralus": "us-central",
+    "northcentralus": "us-north-central",
+    "southcentralus": "us-south-central",
+    "westcentralus": "us-west-central",
+    # Europe Regions
+    "westeurope": "europe-west",
+    "northeurope": "north-europe",
+    "francecentral": "france-central",
+    "francesouth": "france-south",
+    "germanywestcentral": "germany-west-central",
+    "germanynorth": "germany-north",
+    "norwayeast": "norway-east",
+    "norwaywest": "norway-west",
+    "swedencentral": "sweden-central",
+    "swedensouth": "sweden-south",
+    "switzerlandnorth": "switzerland-north",
+    "switzerlandwest": "switzerland-west",
+    "uksouth": "uk-south",
+    "ukwest": "uk-west",
+    "polandcentral": "poland-central",
+    "spaincentral": "spain-central",
+    "italynorth": "italy-north",
+    "austriaeast": "austria-east",
+    "belgiumcentral": "belgium-central",
+    # Asia Pacific Regions
+    "eastasia": "east-asia",
+    "southeastasia": "southeast-asia",
+    "japaneast": "japan-east",
+    "japanwest": "japan-west",
+    "koreacentral": "korea-central",
+    "koreasouth": "korea-south",
+    "australiaeast": "australia-east",
+    "australiasoutheast": "australia-southeast",
+    "australiacentral": "australia-central",
+    "australiacentral2": "australia-central-2",
+    "centralindia": "central-india",
+    "southindia": "south-india",
+    "westindia": "west-india",
+    "indonesiacentral": "indonesia-central",
+    "malaysiawest": "malaysia-west",
+    "newzealandnorth": "new-zealand-north",
+    # Middle East & Africa Regions
+    "uaecentral": "uae-central",
+    "uaenorth": "uae-north",
+    "israelcentral": "israel-central",
+    "qatarcentral": "qatar-central",
+    "southafricanorth": "south-africa-north",
+    "southafricawest": "south-africa-west",
+    # Americas (Other)
+    "brazilsouth": "brazil-south",
+    "brazilsoutheast": "brazil-southeast",
+    "canadacentral": "canada-central",
+    "canadaeast": "canada-east",
+    "mexicocentral": "mexico-central",
+    "chilecentral": "chile-central",
+    # Gov Regions
+    "usgovarizona": "us-gov-arizona",
+    "usgovtexas": "us-gov-texas",
+    "usgovvirginia": "us-gov-virginia",
+}
+
+
+def sanitize_sku_for_vantage(sku):
+    """Convert Azure SKU format to vantage.sh format
+    Example: Standard_F4s_v2 -> f4s-v2
+    """
+    # Remove 'Standard_' prefix
+    sanitized = sku.replace("Standard_", "")
+    # Convert to lowercase
+    sanitized = sanitized.lower()
+    # Replace underscores with hyphens
+    sanitized = sanitized.replace("_", "-")
+    return sanitized
+
+
 def build_azure_pricing(inputs):
     """Build Azure pricing data from API - runs in parallel thread"""
     estimate_rows = []
     price_cache = {}
     unique_skus_regions = set()
+    failover_driver = None  # Lazy initialization for failover scraping
 
     for row in inputs:
         region = row["Region"]
@@ -330,10 +417,36 @@ def build_azure_pricing(inputs):
             prices = price_cache[cache_key]
         else:
             prices = get_prices(sku, region)
+            
+            # FAILOVER: If Azure API returns no data, try vantage.sh
+            if not prices:
+                print(f"⚠️ No pricing data from Azure API for {sku} in {region}")
+                print(f"🔄 Attempting failover to vantage.sh (compute-only pricing)...")
+                
+                try:
+                    # Lazy initialize failover driver on first use
+                    if failover_driver is None:
+                        chrome_options = Options()
+                        chrome_options.add_argument("--headless")
+                        failover_driver = webdriver.Chrome(options=chrome_options)
+                        print(f"   Initialized failover WebDriver")
+                    
+                    prices = scrape_single_vm_pricing_compute_only(sku, region, os_type, failover_driver)
+                    
+                    if prices:
+                        print(f"✅ Successfully retrieved compute-only pricing from vantage.sh")
+                    else:
+                        print(f"⚠️ No pricing found on vantage.sh either, skipping {sku}")
+                        continue
+                        
+                except Exception as e:
+                    print(f"❌ Vantage.sh failover failed: {e}")
+                    continue
+            
             price_cache[cache_key] = prices
 
         if not prices:
-            print(f"⚠️ No pricing data returned for {sku} in {region}")
+            print(f"⚠️ No pricing data available for {sku} in {region}")
             continue
 
         # === PAYG ===
@@ -398,6 +511,14 @@ def build_azure_pricing(inputs):
                 "Estimated monthly cost": f"${monthly_cost:,.2f}"
             })
 
+    # Cleanup failover driver if it was created
+    if failover_driver is not None:
+        try:
+            failover_driver.quit()
+            print(f"\n✅ Closed failover WebDriver")
+        except:
+            pass
+
     return estimate_rows, unique_skus_regions
 
 
@@ -450,6 +571,116 @@ def scrape_windows_pricing(unique_skus_regions):
         filtered_pricing[sku_region] = filtered_prices
 
     return filtered_pricing
+
+
+def scrape_single_vm_pricing_compute_only(sku, region, os_type, driver):
+    """
+    Scrape compute-only pricing for a single VM from vantage.sh (failover for Azure API)
+    
+    Args:
+        sku: Azure SKU (e.g., 'Standard_F4s_v2')
+        region: Azure region (e.g., 'westeurope')
+        os_type: OS type ('Windows' or 'Linux')
+        driver: Selenium WebDriver instance
+        
+    Returns:
+        List of pricing items formatted like Azure API response, or empty list if failed
+    """
+    try:
+        # Sanitize SKU for vantage.sh
+        vantage_sku = sanitize_sku_for_vantage(sku)
+        
+        # Map Azure region to vantage.sh region
+        azure_region_lower = region.lower()
+        if azure_region_lower not in AZURE_TO_VANTAGE_REGION_MAP:
+            print(f"⚠️ No vantage.sh region mapping for Azure region '{region}'")
+            return []
+        
+        vantage_region = AZURE_TO_VANTAGE_REGION_MAP[azure_region_lower]
+        
+        # Determine pricing type and platform
+        os_platform = os_type.lower()
+        if os_platform == "windows":
+            pricing_type = "Standard.hybridbenefit"  # Compute-only for Windows
+        else:
+            pricing_type = "Standard.allUpfront"  # Standard Linux pricing (is compute-only)
+        
+        # Construct URL
+        url = f"https://instances.vantage.sh/azure/vm/{vantage_sku}?currency=USD&platform={os_platform}&duration=monthly&pricingType={pricing_type}&region={vantage_region}"
+        
+        print(f"   Vantage URL: {url}")
+        driver.get(url)
+        time.sleep(1.5)  # Wait for page load
+        
+        # Find pricing section
+        section = driver.find_element(By.CSS_SELECTOR, "section.mb-4")
+        pricing_elements = section.find_elements(By.CSS_SELECTOR, "p.font-bold")
+        
+        # Extract pricing data
+        pricing_data = {}
+        for element in pricing_elements:
+            try:
+                price_text = element.text.strip().replace("\n", " ").split(" ")[0]
+                full_description = element.find_element(By.XPATH, "..").text.strip().replace("\n", " ")
+                pricing_data[price_text] = full_description
+            except:
+                continue
+        
+        if not pricing_data:
+            print(f"   No pricing elements found on vantage.sh page")
+            return []
+        
+        # Parse and format pricing data to match Azure API structure
+        formatted_prices = []
+        
+        for price_str, description in pricing_data.items():
+            description_lower = description.lower()
+            
+            # Skip spot pricing
+            if 'spot' in description_lower:
+                continue
+            
+            # Parse price string (remove $ and commas)
+            try:
+                monthly_cost = float(price_str.replace('$', '').replace(',', ''))
+                hourly_cost = monthly_cost / 730  # Convert monthly to hourly
+            except ValueError:
+                continue
+            
+            # Determine pricing type
+            if 'on demand' in description_lower:
+                formatted_prices.append({
+                    "type": "Consumption",
+                    "meterName": f"{sku} Compute",
+                    "productName": f"Virtual Machines {sku} Series {os_type}",
+                    "unitPrice": hourly_cost,
+                })
+            elif '1-year reserved' in description_lower:
+                # Azure API returns TOTAL reservation cost, so multiply monthly by 12
+                total_reservation_cost = monthly_cost * 12
+                formatted_prices.append({
+                    "type": "Reservation",
+                    "meterName": f"{sku} Compute",
+                    "productName": f"Virtual Machines {sku} Series {os_type}",
+                    "unitPrice": total_reservation_cost,
+                    "reservationTerm": "1 Year",
+                })
+            elif '3-year reserved' in description_lower:
+                # Azure API returns TOTAL reservation cost, so multiply monthly by 36
+                total_reservation_cost = monthly_cost * 36
+                formatted_prices.append({
+                    "type": "Reservation",
+                    "meterName": f"{sku} Compute",
+                    "productName": f"Virtual Machines {sku} Series {os_type}",
+                    "unitPrice": total_reservation_cost,
+                    "reservationTerm": "3 Years",
+                })
+        
+        return formatted_prices
+        
+    except Exception as e:
+        print(f"   Exception during vantage.sh scraping: {e}")
+        return []
 
 
 def build_final_dataframes(estimate_rows, windows_pricing_data):
@@ -738,8 +969,8 @@ def generate_pricing_spreadsheets():
     df_estimate, df_savings, df_ranked = build_final_dataframes(estimate_rows, windows_pricing_data)
     
     # Save Excel files
-    df_estimate.to_excel("azure_estimate.xlsx", index=False)
-    print(f"✅ Created azure_estimate.xlsx with {len(df_estimate)} rows")
+    df_estimate.to_excel("azure_compute_estimate.xlsx", index=False)
+    print(f"✅ Created azure_compute_estimate.xlsx with {len(df_estimate)} rows")
     
     # For azure_savings_estimate, create with FilterMe sheet
     with pd.ExcelWriter("azure_savings_estimate.xlsx", engine='openpyxl') as writer:
@@ -794,7 +1025,7 @@ def main():
             print("\nGenerated Files:")
             print("  - output.json (VM recommendations)")
             print("  - inputs.json (Input for pricing)")
-            print("  - azure_estimate.xlsx (Detailed pricing)")
+            print("  - azure_compute_estimate.xlsx (Detailed compute-only pricing)")
             print("  - azure_savings_estimate.xlsx (With vantage.sh pricing)")
             print("  - ranked_vms.xlsx (Sorted by cost)")
             print("  - azure_windows_pricing_data.json (Windows pricing cache)")
