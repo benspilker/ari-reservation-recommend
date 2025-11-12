@@ -102,8 +102,9 @@ By default, the script filters VMs with annual savings >= $100. To change this, 
 savings_threshold = 100  # Change this value (if desired)
 ```
 
-### Minimum Recommendations
-The script ensures at least 20 VMs are included in the analysis. To change this, edit lines 207 and 211:
+### Addirional Consideration
+If there are less than 20 VMs above the savings threshold, the script will include VMs below the threshold to get up to 20 VMs included in the analysis.
+To change this, edit lines 205 and 209:
 ```python
 if len(impact_recs) < 20:  # Change this value (if desired)
 ```
