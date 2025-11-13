@@ -86,11 +86,33 @@ python azure-reservation-analysis.py
 ## Example Output
 
 ```
+⚠️ Excluded 3 VM(s) with separately-licensed OS images (RHEL, SLES, etc.)
+   These require separate licensing quotes and cannot use standard Azure reservations.
+   Remaining VMs: 840 of 843
+Filtered Virtual Machines: 431 of 840 unique VMs are running (Power State = 'VM running')
+Filtered Advisor: 259 high-impact reservation recommendations found
+  - 1-year reservations (P1Y): 137
+  - 3-year reservations (P3Y): 122
+
+=== Summary Report (VMs matched with Advisor recommendations) ===
+Unique SKUs: 26
+Total VMs: 363
+OS Distribution: {'Windows': 343, 'Linux': 20}
+
 === Impact Summary ===
 {
-    "Total VMs": 847,
-    "Savings (USD) According to ARI": 2859253.26,
-    "Average Savings per VM (USD)": 3376.27
+    "Total VMs": 360,
+    "Excluded VMs (Separate Licensing Required)": 3,
+    "1-Year Reservations": {
+        "VM Count": 113,
+        "Potential Savings (USD) According to ARI": 158564.0,
+        "Average Savings per VM (USD)": 1403.22
+    },
+    "3-Year Reservations": {
+        "VM Count": 247,
+        "Potential Savings (USD) According to ARI": 1292524.0,
+        "Average Savings per VM (USD)": 5232.89
+    }
 }
 ```
 

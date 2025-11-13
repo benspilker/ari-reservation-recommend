@@ -188,6 +188,16 @@ def generate_vm_recommendations():
     ]
 
     print(f"Filtered Advisor: {len(advisor_filtered)} high-impact reservation recommendations found")
+    
+    # === Display Term Breakdown (1-year vs 3-year) ===
+    if "Term" in advisor_filtered.columns:
+        term_counts = advisor_filtered["Term"].value_counts()
+        one_year_count = term_counts.get("P1Y", 0)
+        three_year_count = term_counts.get("P3Y", 0)
+        print(f"  - 1-year reservations (P1Y): {one_year_count}")
+        print(f"  - 3-year reservations (P3Y): {three_year_count}")
+    else:
+        print(f"  ⚠️ Warning: 'Term' column not found in Advisor data")
 
     # === Check for OS information ===
     has_os_type = "OS Type" in vm_df.columns
@@ -240,6 +250,7 @@ def generate_vm_recommendations():
         key = (str(adv["SKU"]).strip(), str(adv["Savings Region"]).lower().strip())
         quantity = int(adv["Quantity"])
         annual_savings = float(adv["Annual Savings"])
+        term = adv.get("Term", "Unknown")
         pool = vm_pool.get(key, [])
 
         selected = 0
@@ -261,6 +272,7 @@ def generate_vm_recommendations():
                             "OS": vm["OS"],
                             "OS Name": vm["OS Name"],
                             "Tags": vm["Tags"],
+                            "Term": term,
                         }
                     ],
                 }
@@ -302,16 +314,35 @@ def generate_vm_recommendations():
     print(f"Unique SKUs: {len(unique_skus)}")
     print(f"Total VMs: {len(recommendations)}")
     print(f"OS Distribution: {os_counts}")
+    
+    # Add delay before Impact Summary
+    time.sleep(3)
 
     # === Impact Summary ===
-    total_savings = sum(rec["Recommendations"][0]["Annual Savings"] for rec in impact_recs)
+    # Calculate savings by term
+    savings_1year = sum(rec["Recommendations"][0]["Annual Savings"] for rec in impact_recs 
+                        if rec["Recommendations"][0].get("Term") == "P1Y")
+    savings_3year = sum(rec["Recommendations"][0]["Annual Savings"] for rec in impact_recs 
+                        if rec["Recommendations"][0].get("Term") == "P3Y")
+    total_savings = savings_1year + savings_3year
+    
+    # Count VMs by term
+    vms_1year = sum(1 for rec in impact_recs if rec["Recommendations"][0].get("Term") == "P1Y")
+    vms_3year = sum(1 for rec in impact_recs if rec["Recommendations"][0].get("Term") == "P3Y")
+    
     impact_summary = {
         "Total VMs": len(impact_recs),
         "Excluded VMs (Separate Licensing Required)": excluded_vms_count,
-        "Savings (USD) According to ARI": round(total_savings, 2),
-        "Average Savings per VM (USD)": round(total_savings / len(impact_recs), 2)
-        if impact_recs
-        else 0,
+        "1-Year Reservations": {
+            "VM Count": vms_1year,
+            "Potential Savings (USD) According to ARI": round(savings_1year, 2),
+            "Average Savings per VM (USD)": round(savings_1year / vms_1year, 2) if vms_1year else 0
+        },
+        "3-Year Reservations": {
+            "VM Count": vms_3year,
+            "Potential Savings (USD) According to ARI": round(savings_3year, 2),
+            "Average Savings per VM (USD)": round(savings_3year / vms_3year, 2) if vms_3year else 0
+        },
     }
     print("\n=== Impact Summary ===")
     print(json.dumps(impact_summary, indent=4))
@@ -867,15 +898,21 @@ def build_final_dataframes(estimate_rows, windows_pricing_data):
             if 'On Demand' in description or 'Pay-as-you-go' in description:
                 cost = pricing_info.get('On Demand', None)
                 if cost is not None:
-                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost}" if not str(cost).startswith('$') else str(cost)
+                    # Parse and round to 2 decimal places
+                    cost_value = float(str(cost).replace('$', '').replace(',', ''))
+                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost_value:,.2f}"
             elif '1 Year' in description:
                 cost = pricing_info.get('1-Year Reserved', None)
                 if cost is not None:
-                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost}" if not str(cost).startswith('$') else str(cost)
+                    # Parse and round to 2 decimal places
+                    cost_value = float(str(cost).replace('$', '').replace(',', ''))
+                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost_value:,.2f}"
             elif '3 Years' in description:
                 cost = pricing_info.get('3-Year Reserved', None)
                 if cost is not None:
-                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost}" if not str(cost).startswith('$') else str(cost)
+                    # Parse and round to 2 decimal places
+                    cost_value = float(str(cost).replace('$', '').replace(',', ''))
+                    df_savings.at[idx, 'Estimated monthly cost'] = f"${cost_value:,.2f}"
     
     # Recalculate totals for savings estimate
     df_savings['cost_numeric'] = df_savings.apply(lambda row: 
