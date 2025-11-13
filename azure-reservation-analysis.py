@@ -217,6 +217,7 @@ def generate_vm_recommendations():
         os_type = group["OS Type"].iloc[0] if "OS Type" in group else "Unknown"
         os_name = group["OS Name"].iloc[0] if "OS Name" in group else "Unknown"
         location = group["Location"].iloc[0] if "Location" in group else "Unknown"
+        creation_time = group["Creation Time"].iloc[0] if "Creation Time" in group else "Unknown"
 
         # Default tag value
         tag_value = "Unknown"
@@ -239,6 +240,7 @@ def generate_vm_recommendations():
             "OS Name": os_name,
             "Region": location,
             "Tags": tag_value,
+            "Creation Time": creation_time,
         }
         vm_pool.setdefault(key, []).append(vm_entry)
 
@@ -273,6 +275,7 @@ def generate_vm_recommendations():
                             "OS Name": vm["OS Name"],
                             "Tags": vm["Tags"],
                             "Term": term,
+                            "Creation Time": vm["Creation Time"],
                         }
                     ],
                 }
@@ -364,6 +367,7 @@ def generate_vm_recommendations():
             "OS Name": rec["Recommendations"][0]["OS Name"],
             "VM Name": rec["Recommendations"][0]["VM Name"],
             "Tags": rec["Recommendations"][0]["Tags"],
+            "Creation Time": rec["Recommendations"][0]["Creation Time"],
         }
         for rec in impact_recs
     ]
@@ -514,6 +518,7 @@ def build_azure_pricing(inputs):
         os_name = row.get("OS Name", "")
         hostname = row.get("VM Name", "")
         tags = row.get("Tags", "")
+        creation_time = row.get("Creation Time", "")
 
         # Track unique SKU-region pairs for Windows
         if os_type.lower() == "windows":
@@ -579,6 +584,7 @@ def build_azure_pricing(inputs):
                 "Service category": "Compute",
                 "Service type": "Virtual Machines",
                 "VM Name": hostname,
+                "Creation Time": creation_time,
                 "Tags": tags,
                 "Region": region,
                 "OS": os_type,
@@ -619,6 +625,7 @@ def build_azure_pricing(inputs):
                 "Service category": "Compute",
                 "Service type": "Virtual Machines",
                 "VM Name": hostname,
+                "Creation Time": creation_time,
                 "Tags": tags,
                 "Region": region,
                 "OS": os_type,
